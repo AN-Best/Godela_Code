@@ -3,8 +3,9 @@ import pyvista as pv
 import subprocess
 import shutil
 import glob
-import math
 import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
+import numpy as np
 import re
 
 ## CONFIGURATION
@@ -29,19 +30,13 @@ def write_file(path, content):
         f.write(content)
     print(f"Written: {path}")
 
-## Fin Volume
-
+# ── FIN VOLUME ─────────────────────────────────────────────────────────────────
 def get_fin_volume(case_dir):
-    """
-    Runs checkMesh on region1 and extracts the total cell volume.
-    Must be called after meshing.
-    """
     result = subprocess.run(
         "source /opt/openfoam11/etc/bashrc && checkMesh -region region1",
         shell=True, cwd=case_dir, env=OPENFOAM_ENV,
         executable="/bin/bash", capture_output=True, text=True
     )
-
     for line in result.stdout.splitlines():
         if "Total volume" in line:
             match = re.search(r"Total volume = ([\d.e+-]+)\.", line)
@@ -49,24 +44,10 @@ def get_fin_volume(case_dir):
                 volume = float(match.group(1))
                 print(f"Fin volume: {volume:.6e} m³")
                 return volume
-
     raise RuntimeError("Could not extract fin volume from checkMesh output")
 
-## CREATE MESH
-
+# ── CREATE MESH ────────────────────────────────────────────────────────────────
 def create_mesh(case_dir, stl_coldplate, stl_fins, pad=0.005, nx=50, ny=50, nz=50, force=False):
-    """
-    Creates the OpenFOAM mesh from STL files.
-
-    Args:
-        case_dir:      Path to the OpenFOAM case directory
-        stl_coldplate: Path to the full cold plate STL (Body_6)
-        stl_fins:      Path to the fins STL (Body_3)
-        pad:           Background mesh padding in meters
-        nx, ny, nz:    Background mesh cell counts
-        force:         If True, remesh even if mesh already exists
-    """
-
     mesh_exists = os.path.exists(f"{case_dir}/constant/solid/polyMesh/boundary")
     if mesh_exists and not force:
         print("\nMesh already exists — skipping meshing. Pass force=True to remesh.")
@@ -77,7 +58,6 @@ def create_mesh(case_dir, stl_coldplate, stl_fins, pad=0.005, nx=50, ny=50, nz=5
     os.makedirs(f"{case_dir}/constant/geometry", exist_ok=True)
     os.makedirs(f"{case_dir}/system", exist_ok=True)
 
-    # ── Minimal controlDict required by all OpenFOAM utilities ────────────────
     write_file(f"{case_dir}/system/controlDict", """FoamFile
     {
         format      ascii;
@@ -94,7 +74,6 @@ def create_mesh(case_dir, stl_coldplate, stl_fins, pad=0.005, nx=50, ny=50, nz=5
     writeInterval   1;
     """)
 
-    # ── Scale STL files to meters ──────────────────────────────────────────────
     for src, dst in [(stl_coldplate, "coldplate.stl"), (stl_fins, "fins.stl")]:
         mesh = pv.read(src)
         mesh.scale(0.001, inplace=True)
@@ -102,16 +81,12 @@ def create_mesh(case_dir, stl_coldplate, stl_fins, pad=0.005, nx=50, ny=50, nz=5
         mesh.save(f"{case_dir}/constant/geometry/{dst}")
         print(f"Saved {dst}, bounds: {[round(x,4) for x in mesh.bounds]}")
 
-    # ── Compute bounds and locationInMesh ──────────────────────────────────────
     body6 = pv.read(f"{case_dir}/constant/triSurface/coldplate.stl")
     xmin, xmax = body6.bounds[0] - pad, body6.bounds[1] + pad
     ymin, ymax = body6.bounds[2] - pad, body6.bounds[3] + pad
     zmin, zmax = body6.bounds[4] - pad, body6.bounds[5] + pad
     cx, cy, cz = body6.center
-    print(f"Bounds: X={xmin:.4f} to {xmax:.4f}, Y={ymin:.4f} to {ymax:.4f}, Z={zmin:.4f} to {zmax:.4f}")
-    print(f"locationInMesh: ({cx:.6f} {cy:.6f} {cz:.6f})")
 
-    # ── Write mesh dicts ───────────────────────────────────────────────────────
     write_file(f"{case_dir}/system/surfaceFeaturesDict", f"""FoamFile
 {{
     format ascii; class dictionary; object surfaceFeaturesDict;
@@ -211,7 +186,6 @@ patches
 );
 """)
 
-    # ── Run meshing commands ───────────────────────────────────────────────────
     run_cmd("source /opt/openfoam11/etc/bashrc && blockMesh", case_dir)
     run_cmd("source /opt/openfoam11/etc/bashrc && surfaceFeatures", case_dir)
 
@@ -226,42 +200,81 @@ patches
 
     print("\nMeshing complete.")
 
+# ── PARSE POSTPROCESSING ───────────────────────────────────────────────────────
+def _parse_dat(filepath):
+    rows = []
+    with open(filepath) as f:
+        for line in f:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.split()
+            try:
+                rows.append([float(v) for v in parts])
+            except ValueError:
+                continue
+    return rows
 
-def plot_convergence(case_dir,show_plots):
-    """
-    Parses solver.log and plots residuals for all solved fields.
-    """
+def _read_pressure_series(case_dir):
+    # postProcessing files are written under postProcessing/solid/
+    inlet_dats  = sorted(glob.glob(
+        f"{case_dir}/postProcessing/solid/patchAverageInlet/*/surfaceFieldValue.dat"))
+    outlet_dats = sorted(glob.glob(
+        f"{case_dir}/postProcessing/solid/patchAverageOutlet/*/surfaceFieldValue.dat"))
+    if not inlet_dats or not outlet_dats:
+        return [], []
+    rows_in  = _parse_dat(inlet_dats[-1])
+    rows_out = _parse_dat(outlet_dats[-1])
+    n        = min(len(rows_in), len(rows_out))
+    times    = [rows_in[i][0]                  for i in range(n)]
+    delta_ps = [rows_in[i][1] - rows_out[i][1] for i in range(n)]
+    return times, delta_ps
+
+def _read_tmax_series(case_dir, T_inlet, heat_flux):
+    tmax_dats = sorted(glob.glob(
+        f"{case_dir}/postProcessing/solid/fieldTmax/*/volFieldValue.dat"))
+    if not tmax_dats:
+        return [], [], []
+    times, T_maxes, R_ths = [], [], []
+    for row in _parse_dat(tmax_dats[-1]):
+        if len(row) >= 2:
+            t     = row[0]
+            T_max = row[1]
+            times.append(t)
+            T_maxes.append(T_max)
+            R_ths.append((T_max - T_inlet) / heat_flux)
+    return times, T_maxes, R_ths
+
+def _is_converged(series, tol=0.01):
+    """True if last 10% of values vary by less than tol fraction of mean."""
+    if len(series) < 10:
+        return False
+    tail = series[int(len(series) * 0.9):]
+    return (max(tail) - min(tail)) / (abs(np.mean(tail)) + 1e-10) < tol
+
+# ── CONVERGENCE PLOT ───────────────────────────────────────────────────────────
+def plot_convergence(case_dir, show_plots, T_inlet=None, heat_flux=None):
     log_path = f"{case_dir}/solver.log"
     if not os.path.exists(log_path):
         print("No solver.log found")
         return
 
-    # ── Parse residuals from log ───────────────────────────────────────────────
-    pattern = re.compile(
-        r"smoothSolver|GAMG.*?Solving for (\w+).*?Initial residual = ([\d.e+-]+)",
-    )
-    # More robust pattern
     solve_pattern = re.compile(
         r"Solving for (\w+), Initial residual = ([\d.e+-]+), Final residual = ([\d.e+-]+)"
     )
-
-    residuals = {}  # field -> list of initial residuals
-    times     = {}  # field -> list of time steps
-
+    residuals    = {}
+    times        = {}
     current_time = None
+
     with open(log_path, 'r') as f:
         for line in f:
-            # Detect time step
             time_match = re.match(r"^\s+Time = ([\d.]+)s?$", line)
             if time_match:
                 current_time = float(time_match.group(1))
                 continue
-
-            # Detect residual lines
             solve_match = solve_pattern.search(line)
             if solve_match and current_time is not None:
-                field   = solve_match.group(1)
-                resid   = float(solve_match.group(2))
+                field = solve_match.group(1)
+                resid = float(solve_match.group(2))
                 if field not in residuals:
                     residuals[field] = []
                     times[field]     = []
@@ -272,28 +285,54 @@ def plot_convergence(case_dir,show_plots):
         print("No residuals found in log")
         return
 
-    # ── Plot ──────────────────────────────────────────────────────────────────
-    # Group fields for cleaner subplots
+    # ── Physical quantities ────────────────────────────────────────────────────
+    dp_times, delta_p_series        = _read_pressure_series(case_dir)
+    phys_times, T_max_series, R_ths = (
+        _read_tmax_series(case_dir, T_inlet, heat_flux)
+        if T_inlet is not None and heat_flux is not None
+        else ([], [], [])
+    )
+
+    has_T  = len(T_max_series) > 0
+    has_dp = len(delta_p_series) > 0
+
+    # ── Print stabilization status ─────────────────────────────────────────────
+    if has_T:
+        conv_T  = _is_converged(T_max_series)
+        conv_Rth = _is_converged(R_ths)
+        print(f"T_max converged:  {conv_T}  "
+              f"(final={T_max_series[-1]-273.15:.2f} °C)")
+        print(f"R_th  converged:  {conv_Rth}  "
+              f"(final={R_ths[-1]:.4f} K/W)")
+    if has_dp:
+        conv_dp = _is_converged(delta_p_series)
+        print(f"ΔP    converged:  {conv_dp}  "
+              f"(final={delta_p_series[-1]:.2f} Pa)")
+
+    # ── Layout ─────────────────────────────────────────────────────────────────
     fluid_fields = [f for f in residuals if f in ["Ux", "Uy", "Uz", "p_rgh", "h"]]
     solid_fields = [f for f in residuals if f in ["e"]]
     other_fields = [f for f in residuals if f not in fluid_fields + solid_fields]
-    all_groups   = [("Fluid", fluid_fields), ("Solid", solid_fields)]
+    groups       = [("Fluid", fluid_fields), ("Solid", solid_fields)]
     if other_fields:
-        all_groups.append(("Other", other_fields))
+        groups.append(("Other", other_fields))
 
-    fig, axes = plt.subplots(len(all_groups), 1, figsize=(12, 4 * len(all_groups)))
-    if len(all_groups) == 1:
+    n_phys = (1 if has_T else 0) + (1 if has_dp else 0)
+    n_rows = len(groups) + n_phys
+
+    fig, axes = plt.subplots(n_rows, 1, figsize=(12, 4 * n_rows))
+    if n_rows == 1:
         axes = [axes]
 
     colors = plt.cm.tab10.colors
 
-    for ax, (group_name, fields) in zip(axes, all_groups):
-        for i, field in enumerate(fields):
+    # ── Residual subplots ──────────────────────────────────────────────────────
+    for i, (group_name, fields) in enumerate(groups):
+        ax = axes[i]
+        for j, field in enumerate(fields):
             if field in residuals:
-                ax.semilogy(
-                    times[field], residuals[field],
-                    label=field, color=colors[i % len(colors)], linewidth=1.5
-                )
+                ax.semilogy(times[field], residuals[field],
+                            label=field, color=colors[j % len(colors)], linewidth=1.5)
         ax.set_title(f"{group_name} Residuals")
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Initial Residual")
@@ -301,41 +340,84 @@ def plot_convergence(case_dir,show_plots):
         ax.grid(True, which="both", alpha=0.3)
         ax.axhline(1e-4, color="gray", linestyle="--", alpha=0.5, label="1e-4 target")
 
+    offset = len(groups)
+
+    # ── T_max / R_th subplot ───────────────────────────────────────────────────
+    if has_T:
+        ax_T  = axes[offset]
+        ax_T2 = ax_T.twinx()
+
+        T_celsius = [T - 273.15 for T in T_max_series]
+        ax_T.plot(phys_times, T_celsius,
+                  color="tomato", linewidth=2, marker="o", markersize=3, label="T_max")
+        ax_T2.plot(phys_times, R_ths,
+                   color="steelblue", linewidth=2, linestyle="--",
+                   marker="s", markersize=3, label="R_th")
+
+        # Shade converged tail
+        if _is_converged(T_max_series) and len(phys_times) >= 10:
+            tail_start = phys_times[int(len(phys_times) * 0.9)]
+            ax_T.axvspan(tail_start, phys_times[-1],
+                         alpha=0.12, color="green", label="converged")
+
+        ax_T.set_xlabel("Iteration")
+        ax_T.set_ylabel("T_max (°C)", color="tomato")
+        ax_T2.set_ylabel("R_th (K/W)", color="steelblue")
+        conv_str = "converged" if _is_converged(T_max_series) else "not converged"
+        ax_T.set_title(f"Thermal Convergence  {conv_str}")
+        ax_T.grid(True, alpha=0.3)
+        ax_T.legend(loc="upper left", fontsize=8)
+
+        ax_T.annotate(f"  {T_celsius[-1]:.2f} °C",
+                      xy=(phys_times[-1], T_celsius[-1]),
+                      color="tomato", fontsize=10)
+        ax_T2.annotate(f"  {R_ths[-1]:.4f} K/W",
+                       xy=(phys_times[-1], R_ths[-1]),
+                       color="steelblue", fontsize=10)
+        offset += 1
+
+    # ── ΔP subplot ─────────────────────────────────────────────────────────────
+    if has_dp:
+        ax_p = axes[offset]
+        ax_p.plot(dp_times, delta_p_series,
+                  color="seagreen", linewidth=2, marker="o", markersize=3)
+
+        # Shade converged tail
+        if _is_converged(delta_p_series) and len(dp_times) >= 10:
+            tail_start = dp_times[int(len(dp_times) * 0.9)]
+            ax_p.axvspan(tail_start, dp_times[-1],
+                         alpha=0.12, color="green", label="converged")
+
+        conv_str = " converged" if _is_converged(delta_p_series) else " not converged"
+        ax_p.set_xlabel("Iteration")
+        ax_p.set_ylabel("ΔP (Pa)", color="seagreen")
+        ax_p.set_title(f"Pressure Drop Convergence  {conv_str}")
+        ax_p.grid(True, alpha=0.3)
+        ax_p.annotate(f"  {delta_p_series[-1]:.2f} Pa",
+                      xy=(dp_times[-1], delta_p_series[-1]),
+                      color="seagreen", fontsize=10)
+
     plt.suptitle("SIMPLE Convergence", fontsize=14)
     plt.tight_layout()
 
     plot_path = f"{case_dir}/convergence.png"
     plt.savefig(plot_path, dpi=150)
     print(f"Saved convergence plot: {plot_path}")
-    if show_plots==True:
+    if show_plots:
         plt.show()
 
-
-# RUN SOLVER
-def run_solver(case_dir, T_inlet, flow_rate, heat_flux, fin_volume, end_time=2500, write_interval=500,show_plots=True):
-    """
-    Writes all BC/property files and runs foamMultiRun.
-
-    Args:
-        case_dir:      Path to the OpenFOAM case directory
-        T_inlet:       Inlet water temperature in Kelvin
-        flow_rate:     Volumetric flow rate in m³/s
-        heat_flux:     Total heat input in Watts
-        fin_volume:    Fin volume in m³ (from checkMesh -region region1)
-        end_time:      Number of SIMPLE iterations
-        write_interval: How often to write results
-    """
+# ── RUN SOLVER ─────────────────────────────────────────────────────────────────
+def run_solver(case_dir, T_inlet, flow_rate, heat_flux, fin_volume,
+               end_time=2500, write_interval=500, show_plots=True):
 
     pad        = 0.005
     A_end_face = (0.0401*2 + pad*2) * (0.0305 + 0.0023 + pad*2)
     U_eff      = flow_rate / A_end_face
     q_vol      = heat_flux / fin_volume
-    A_base     = 0.080 * 0.138
 
-    print(f"Inlet velocity: {U_eff:.6f} m/s")
+    print(f"Inlet velocity:         {U_eff:.6f} m/s")
     print(f"Volumetric heat source: {q_vol:.1f} W/m³")
 
-    # controlDict 
     write_file(f"{case_dir}/system/controlDict", f"""FoamFile
 {{
     format ascii; class dictionary; object controlDict;
@@ -357,6 +439,7 @@ functions
         libs            ("libfieldFunctionObjects.so");
         writeControl    timeStep;
         writeInterval   {write_interval};
+        writeFields     false;
         operation       areaAverage;
         regionType      patch;
         name            inlet;
@@ -369,16 +452,28 @@ functions
         libs            ("libfieldFunctionObjects.so");
         writeControl    timeStep;
         writeInterval   {write_interval};
+        writeFields     false;
         operation       areaAverage;
         regionType      patch;
         name            outlet;
         fields          (p_rgh p);
         region          solid;
     }}
+    fieldTmax
+    {{
+        type            volFieldValue;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    timeStep;
+        writeInterval   1;
+        writeFields     false;
+        select          all;
+        operation       max;
+        fields          (T);
+        region          solid;
+    }}
 }}
 """)
 
-    # fvSchemes / fvSolution fluid
     write_file(f"{case_dir}/system/solid/fvSchemes", """FoamFile
 {
     format ascii; class dictionary; object fvSchemes;
@@ -424,7 +519,6 @@ relaxationFactors
 }
 """)
 
-    # fvSchemes / fvSolution solid 
     write_file(f"{case_dir}/system/region1/fvSchemes", """FoamFile
 {
     format ascii; class dictionary; object fvSchemes;
@@ -450,7 +544,6 @@ SIMPLE { nNonOrthogonalCorrectors 2; }
 relaxationFactors { equations { e 0.7; } }
 """)
 
-    # Physical properties 
     write_file(f"{case_dir}/constant/solid/physicalProperties", """FoamFile
 {
     format ascii; class dictionary; object physicalProperties;
@@ -548,7 +641,6 @@ SIMPLE { nNonOrthogonalCorrectors 2; }
 PIMPLE { nOuterCorrectors 1; nCorrectors 2; nNonOrthogonalCorrectors 2; }
 """)
 
-    # Boundary conditions
     write_file(f"{case_dir}/0/solid/T", f"""FoamFile
 {{
     format ascii; class volScalarField; object T;
@@ -626,7 +718,6 @@ boundaryField
 }}
 """)
 
-    # Clean old time dirs and run
     for time_dir in glob.glob(f"{case_dir}/[0-9]*/"):
         if not time_dir.endswith("/0/"):
             shutil.rmtree(time_dir)
@@ -634,32 +725,15 @@ boundaryField
 
     for artefact in glob.glob(f"{case_dir}/0/solid/cellToRegion"):
         os.remove(artefact)
-        print(f"Removed artefact: {artefact}")
     for artefact in glob.glob(f"{case_dir}/0/region1/cellToRegion"):
         os.remove(artefact)
-        print(f"Removed artefact: {artefact}")
 
     run_cmd("source /opt/openfoam11/etc/bashrc && foamMultiRun 2>&1 | tee solver.log", case_dir)
     print("\nSolver complete.")
-    plot_convergence(case_dir,show_plots)
+    plot_convergence(case_dir, show_plots, T_inlet=T_inlet, heat_flux=heat_flux)
 
-
-# FUNCTION 3: VIEW RESULTS
+# ── VIEW RESULTS ───────────────────────────────────────────────────────────────
 def view_results(case_dir, T_inlet, heat_flux, show_plots=True):
-    """
-    Extracts thermal resistance, pressure drop, and optionally plots temperature fields.
-
-    Args:
-        case_dir:    Path to the OpenFOAM case directory
-        T_inlet:     Inlet temperature in Kelvin
-        heat_flux:   Total heat input in Watts
-        show_plots:  If True, opens interactive pyvista windows
-
-    Returns:
-        dict with T_max, R_th, delta_p, and latest time step
-    """
-
-    # Find latest time step
     time_dirs = sorted([
         d for d in os.listdir(case_dir)
         if os.path.isdir(f"{case_dir}/{d}") and d.replace('.','').isdigit()
@@ -667,86 +741,111 @@ def view_results(case_dir, T_inlet, heat_flux, show_plots=True):
     latest = time_dirs[-1]
     print(f"Reading results from time: {latest}")
 
-    # Convert to VTK
     for region in ["solid", "region1"]:
         subprocess.run(
             f"source /opt/openfoam11/etc/bashrc && foamToVTK -region {region} -time {latest}",
             shell=True, cwd=case_dir, env=OPENFOAM_ENV, executable="/bin/bash"
         )
 
-    # Thermal resistance from solid region 
+    # ── Thermal resistance ─────────────────────────────────────────────────────
     T_max = None
     R_th  = None
-    solid_vtk = glob.glob(f"{case_dir}/VTK/region1/coldplate_case_{latest}.vtk")
+    solid_vtk = glob.glob(
+        f"{case_dir}/VTK/solid/solid_to_region1/solid_to_region1_{latest}.vtk")
     if solid_vtk:
         solid = pv.read(solid_vtk[0])
         if "T" in solid.array_names:
             T_max = solid["T"].max()
             R_th  = (T_max - T_inlet) / heat_flux
-            print(f"\n Thermal Results ")
-            print(f"T_max  = {T_max:.2f} K  ({T_max-273.15:.2f}°C)")
-            print(f"T_inlet= {T_inlet:.2f} K  ({T_inlet-273.15:.2f}°C)")
-            print(f"R_th   = {R_th:.6f} K/W")
+            print(f"\n── Thermal Results ─────────────────────")
+            print(f"T_max   = {T_max:.2f} K  ({T_max-273.15:.2f} °C)")
+            print(f"T_inlet = {T_inlet:.2f} K  ({T_inlet-273.15:.2f} °C)")
+            print(f"R_th    = {R_th:.6f} K/W")
 
-    # Pressure drop from inlet and outlet patches 
+    # ── Pressure drop ──────────────────────────────────────────────────────────
     delta_p = None
+    p_inlet = p_outlet = None
+
     inlet_vtk  = glob.glob(f"{case_dir}/VTK/solid/inlet/inlet_{latest}.vtk")
     outlet_vtk = glob.glob(f"{case_dir}/VTK/solid/outlet/outlet_{latest}.vtk")
-
     if inlet_vtk and outlet_vtk:
         inlet_mesh  = pv.read(inlet_vtk[0])
         outlet_mesh = pv.read(outlet_vtk[0])
-
-        # Use p_rgh if available, fall back to p
         p_field = "p_rgh" if "p_rgh" in inlet_mesh.array_names else "p"
-
         if p_field in inlet_mesh.array_names and p_field in outlet_mesh.array_names:
             p_inlet  = inlet_mesh[p_field].mean()
             p_outlet = outlet_mesh[p_field].mean()
             delta_p  = p_inlet - p_outlet
-            print(f"\n── Pressure Results ────────────────────")
-            print(f"P_inlet  = {p_inlet:.2f} Pa")
-            print(f"P_outlet = {p_outlet:.2f} Pa")
-            print(f"ΔP       = {delta_p:.2f} Pa")
-        else:
-            print(f"Pressure field not found. Available: {inlet_mesh.array_names}")
+
+    if delta_p is None:
+        dp_times, dp_series = _read_pressure_series(case_dir)
+        if dp_series:
+            delta_p = dp_series[-1]
+
+    if delta_p is not None:
+        print(f"\n── Pressure Results ────────────────────")
+        if p_inlet is not None:
+            print(f"P_inlet  = {p_inlet:.4f} Pa")
+            print(f"P_outlet = {p_outlet:.4f} Pa")
+        print(f"ΔP       = {delta_p:.4f} Pa")
     else:
-        print("Inlet or outlet VTK patches not found")
+        print("No pressure data found — rerun solver to generate postProcessing files")
 
-    # ── Plots ─────────────────────────────────────────────────────────────────
+    # ── Plots ──────────────────────────────────────────────────────────────────
     if show_plots:
-        # Cold plate surface temperature
-        coldplate_vtk = glob.glob(f"{case_dir}/VTK/region1/coldplate/coldplate_{latest}.vtk")
-        if coldplate_vtk:
-            cp = pv.read(coldplate_vtk[0])
-            if "T" in cp.array_names:
-                # Project onto full body6 STL
-                body6_path = glob.glob(f"{case_dir}/constant/triSurface/coldplate.stl")
-                if body6_path:
-                    body6 = pv.read(body6_path[0])
-                    body6_with_T = body6.sample(cp)
-                    pl = pv.Plotter()
-                    pl.add_mesh(body6_with_T, scalars="T", cmap="hot",
-                                clim=[T_inlet, T_max] if T_max else None)
-                    pl.add_scalar_bar("Temperature (K)")
-                    pl.title = "Cold Plate Surface Temperature"
-                    pl.show()
+        pedestal_file  = glob.glob(
+            f"{case_dir}/VTK/solid/solid_to_region1/solid_to_region1_{latest}.vtk")
+        coldplate_file = glob.glob(
+            f"{case_dir}/VTK/solid/coldplate/coldplate_{latest}.vtk")
 
-        # Fluid-solid interface temperature
-        interface_vtk = glob.glob(f"{case_dir}/VTK/solid/solid_to_region1/solid_to_region1_{latest}.vtk")
-        if interface_vtk:
-            interface = pv.read(interface_vtk[0])
-            if "T" in interface.array_names:
-                pl = pv.Plotter()
-                pl.add_mesh(interface, scalars="T", cmap="coolwarm")
-                pl.add_scalar_bar("Temperature (K)")
-                pl.title = "Fluid-Solid Interface Temperature"
-                pl.show()
+        if pedestal_file and coldplate_file:
+            pedestal       = pv.read(pedestal_file[0]).cell_data_to_point_data()
+            coldplate_mesh = pv.read(coldplate_file[0]).cell_data_to_point_data()
 
-        print("\nAvailable VTK files in solid:")
-        for root, dirs, files in os.walk(f"{case_dir}/VTK/solid"):
-            for f in files:
-                print(f"  {os.path.join(root, f)}")
+            pts    = pedestal.points
+            T_ped  = pedestal["T"]
+            triang = mtri.Triangulation(pts[:, 0], pts[:, 2])
+
+            cp_pts    = coldplate_mesh.points
+            T_cp      = coldplate_mesh["T"]
+            y_thresh  = np.percentile(cp_pts[:, 1], 85)
+            mask      = cp_pts[:, 1] > y_thresh
+            triang_cp = mtri.Triangulation(cp_pts[mask, 0], cp_pts[mask, 2])
+
+            fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+            fig.patch.set_facecolor("white")
+
+            ax0  = axes[0]
+            tpc0 = ax0.tripcolor(triang_cp, T_cp[mask], cmap="hot",
+                                 vmin=T_inlet, vmax=T_cp.max(), shading="gouraud")
+            plt.colorbar(tpc0, ax=ax0, label="Temperature (K)")
+            ax0.set_xlabel("X (m)")
+            ax0.set_ylabel("Z (m)")
+            ax0.set_title(f"Cold Plate Top Surface\nT_max={T_cp.max()-273.15:.1f} °C")
+            ax0.set_aspect("equal")
+
+            ax1  = axes[1]
+            tpc1 = ax1.tripcolor(triang, T_ped, cmap="hot",
+                                 vmin=T_ped.min(), vmax=T_ped.max(), shading="gouraud")
+            plt.colorbar(tpc1, ax=ax1, label="Temperature (K)")
+            ax1.set_xlabel("X (m)")
+            ax1.set_ylabel("Z (m)")
+            title_str = f"Pedestal Heat Map\nΔT={T_ped.max()-T_ped.min():.2f} K"
+            if R_th:
+                title_str += f"  |  R_th={R_th:.4f} K/W"
+            if delta_p:
+                title_str += f"  |  ΔP={delta_p:.1f} Pa"
+            ax1.set_title(title_str)
+            ax1.set_aspect("equal")
+
+            plt.tight_layout()
+            plot_path = f"{case_dir}/results.png"
+            plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+            print(f"Saved results plot: {plot_path}")
+            plt.show()
+
+        plot_convergence(case_dir, show_plots, T_inlet=T_inlet, heat_flux=heat_flux)
+
     return {
         "T_max"   : T_max,
         "R_th"    : R_th,
