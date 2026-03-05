@@ -33,9 +33,9 @@ run_solver(
     flow_rate     = flow_rate,
     heat_flux     = heat_flux,
     fin_volume    = fin_volume,
-    end_time      = 3000,
-    write_interval= 500,
-    show_plots=False
+    end_time      = 50,
+    write_interval= 5,
+    show_plots=True
 )
 
 

@@ -48,7 +48,7 @@ for i in range(N_runs):
         heat_flux     = heat_flux,
         fin_volume    = fin_volume,
         end_time      = 2500,
-        write_interval= 500,
+        write_interval= 50,
         show_plots=False
     )
 
