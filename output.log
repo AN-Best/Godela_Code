@@ -1,134 +1,32 @@
-u_mag = 2424.7983019540843
 Info    : Reading 'coldplate.msh'...
 Info    : 8938 entities
-Info    : 33890 nodes
-Info    : 136307 elements
+Info    : 63378 nodes
+Info    : 260801 elements
 Info    : [  0%] Reading elements                                                                                Info    : [ 10%] Reading elements                                                                                Info    : [ 20%] Reading elements                                                                                Info    : [ 30%] Reading elements                                                                                Info    : [ 40%] Reading elements                                                                                Info    : [ 50%] Reading elements                                                                                Info    : [ 60%] Reading elements                                                                                Info    : [ 70%] Reading elements                                                                                Info    : [ 80%] Reading elements                                                                                Info    : [ 90%] Reading elements                                                                                                                                                                Info    : Done reading 'coldplate.msh'
-Velocity DOFs: 61242
-Pressure DOFs: 10518
-Starting assembly...
-Assembly done, starting solve...
-  0 KSP Residual norm 2.062913023386e+14
-  1 KSP Residual norm 1.257361315701e+12
-  2 KSP Residual norm 1.257360606799e+12
-  3 KSP Residual norm 1.257360606799e+12
-  4 KSP Residual norm 1.257360606799e+12
-  5 KSP Residual norm 1.257360606799e+12
-  6 KSP Residual norm 1.257360606799e+12
-  7 KSP Residual norm 1.257360606799e+12
-  8 KSP Residual norm 1.257360606799e+12
-  9 KSP Residual norm 1.257360606799e+12
- 10 KSP Residual norm 1.257360606799e+12
- 11 KSP Residual norm 1.257360606799e+12
- 12 KSP Residual norm 1.257360606799e+12
- 13 KSP Residual norm 1.257360606799e+12
- 14 KSP Residual norm 1.257360606799e+12
- 15 KSP Residual norm 1.257360606799e+12
- 16 KSP Residual norm 1.257360606799e+12
- 17 KSP Residual norm 1.257360606799e+12
- 18 KSP Residual norm 1.257360606799e+12
- 19 KSP Residual norm 1.257360606799e+12
- 20 KSP Residual norm 1.257360606799e+12
- 21 KSP Residual norm 1.257360606799e+12
- 22 KSP Residual norm 1.257360606799e+12
- 23 KSP Residual norm 1.257360606799e+12
- 24 KSP Residual norm 1.257360606799e+12
- 25 KSP Residual norm 1.257360606799e+12
- 26 KSP Residual norm 1.257360606799e+12
- 27 KSP Residual norm 1.257360606799e+12
- 28 KSP Residual norm 1.257360606799e+12
- 29 KSP Residual norm 1.257360606799e+12
- 30 KSP Residual norm 1.257360606803e+12
- 31 KSP Residual norm 1.257360606800e+12
- 32 KSP Residual norm 1.257360606708e+12
- 33 KSP Residual norm 1.257360606616e+12
- 34 KSP Residual norm 1.257360606525e+12
- 35 KSP Residual norm 1.257360606433e+12
- 36 KSP Residual norm 1.257360606342e+12
- 37 KSP Residual norm 1.257360606250e+12
- 38 KSP Residual norm 1.257360606158e+12
- 39 KSP Residual norm 1.257360606067e+12
- 40 KSP Residual norm 1.257360605975e+12
- 41 KSP Residual norm 1.257360605883e+12
- 42 KSP Residual norm 1.257360605792e+12
- 43 KSP Residual norm 1.257360605700e+12
- 44 KSP Residual norm 1.257360605608e+12
- 45 KSP Residual norm 1.257360605517e+12
- 46 KSP Residual norm 1.257360605425e+12
- 47 KSP Residual norm 1.257360605333e+12
- 48 KSP Residual norm 1.257360605242e+12
- 49 KSP Residual norm 1.257360605150e+12
- 50 KSP Residual norm 1.257360605058e+12
- 51 KSP Residual norm 1.257360604967e+12
- 52 KSP Residual norm 1.257360604875e+12
- 53 KSP Residual norm 1.257360604783e+12
- 54 KSP Residual norm 1.257360604692e+12
- 55 KSP Residual norm 1.257360604600e+12
- 56 KSP Residual norm 1.257360604508e+12
- 57 KSP Residual norm 1.257360604417e+12
- 58 KSP Residual norm 1.257360604325e+12
- 59 KSP Residual norm 1.257360604233e+12
- 60 KSP Residual norm 1.257360761719e+12
- 61 KSP Residual norm 1.257360606800e+12
- 62 KSP Residual norm 1.257360462533e+12
- 63 KSP Residual norm 1.257360318267e+12
- 64 KSP Residual norm 1.257360174001e+12
- 65 KSP Residual norm 1.257360029735e+12
- 66 KSP Residual norm 1.257359885469e+12
- 67 KSP Residual norm 1.257359741203e+12
- 68 KSP Residual norm 1.257359596937e+12
- 69 KSP Residual norm 1.257359452671e+12
- 70 KSP Residual norm 1.257359308405e+12
- 71 KSP Residual norm 1.257359164139e+12
- 72 KSP Residual norm 1.257359019873e+12
- 73 KSP Residual norm 1.257358875607e+12
- 74 KSP Residual norm 1.257358731341e+12
- 75 KSP Residual norm 1.257358587076e+12
- 76 KSP Residual norm 1.257358442810e+12
- 77 KSP Residual norm 1.257358298544e+12
- 78 KSP Residual norm 1.257358154279e+12
- 79 KSP Residual norm 1.257358010013e+12
- 80 KSP Residual norm 1.257357865748e+12
- 81 KSP Residual norm 1.257357721483e+12
- 82 KSP Residual norm 1.257357577217e+12
- 83 KSP Residual norm 1.257357432952e+12
- 84 KSP Residual norm 1.257357288687e+12
- 85 KSP Residual norm 1.257357144421e+12
- 86 KSP Residual norm 1.257357000156e+12
- 87 KSP Residual norm 1.257356855891e+12
- 88 KSP Residual norm 1.257356711626e+12
- 89 KSP Residual norm 1.257356567361e+12
- 90 KSP Residual norm 1.257473872567e+12
- 91 KSP Residual norm 1.257360606800e+12
- 92 KSP Residual norm 1.255462975169e+12
- 93 KSP Residual norm 1.253573909507e+12
- 94 KSP Residual norm 1.251693345561e+12
- 95 KSP Residual norm 1.249821219754e+12
- 96 KSP Residual norm 1.247957469168e+12
- 97 KSP Residual norm 1.246102031545e+12
- 98 KSP Residual norm 1.244254845268e+12
- 99 KSP Residual norm 1.242415849362e+12
-100 KSP Residual norm 1.240584983478e+12
-101 KSP Residual norm 1.238762187888e+12
-102 KSP Residual norm 1.236947403479e+12
-103 KSP Residual norm 1.235140571738e+12
-104 KSP Residual norm 1.233341634753e+12
-105 KSP Residual norm 1.231550535199e+12
-106 KSP Residual norm 1.229767216331e+12
-107 KSP Residual norm 1.227991621978e+12
-108 KSP Residual norm 1.226223696536e+12
-109 KSP Residual norm 1.224463384960e+12
-110 KSP Residual norm 1.222710632755e+12
-111 KSP Residual norm 1.220965385971e+12
-112 KSP Residual norm 1.219227591196e+12
-113 KSP Residual norm 1.217497195549e+12
-114 KSP Residual norm 1.215774146672e+12
-115 KSP Residual norm 1.214058392725e+12
-116 KSP Residual norm 1.212349882377e+12
-117 KSP Residual norm 1.210648564804e+12
-118 KSP Residual norm 1.208954389677e+12
-119 KSP Residual norm 1.207267307160e+12
-Solve done
-Max velocity: 2325.8623669711305
-Max pressure: 17222.037742512242
-Plot saved
+Geometric inlet face count: 6
+Geometric inlet area:       9.379055122985465 mm²
+Theoretical inlet area:     11.341149479459153 mm²
+u_inlet_actual:             2932.065078987021 mm/s
+Geometric outlet face count: 6
+Geometric outlet area:       9.379055122985465 mm²
+Velocity DOFs: 122958
+Pressure DOFs: 20145
+Assembling Stokes...
+Max velocity: 5221.618377709761
+Max pressure: 1264.4462870606362
+Inlet flux:  -24669.06032650752 mm³/s
+Outlet flux: 23925.617151788443 mm³/s
+Total flux:  -743.4431747190706 mm³/s
+Expected:    27500.0 mm³/s
+Stokes plot saved
+Fluid volume near fins: 4786.273535788667 mm³
+Q_vol = 0.22982388945698765 W/mm³
+Total heat input check: 1100.000000000002 W
+Temperature DOFs: 110250
+Assembling temperature...
+Temperature done
+Max fluid temp: 313.9592769687914 K
+Min fluid temp: 313.08560434242133 K
+Net convective heat transport: -953.6096091336185 W
+Expected: 1100 W
+Temperature plot saved
