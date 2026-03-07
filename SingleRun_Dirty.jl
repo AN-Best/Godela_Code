@@ -6,7 +6,7 @@ using GridapMakie
 using GLMakie
 
 #PART 1: MESHING
-plotter = false
+plotter = true
 
 if !isfile("coldplate.msh")
 
@@ -57,8 +57,8 @@ if !isfile("coldplate.msh")
     gmsh.model.addPhysicalGroup(2, no_slip_tag, 104)
     gmsh.model.setPhysicalName(2, 104, "no_slip")
 
-    gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.05)
-    gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 2.0)
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.01)
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 1.0)
 
     gmsh.model.mesh.generate(3)
     gmsh.write("coldplate.msh")
